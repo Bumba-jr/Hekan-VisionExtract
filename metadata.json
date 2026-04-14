@@ -1,0 +1,6 @@
+{
+  "name": "VisionExtract",
+  "description": "Extract text from multiple images using Gemini AI and export the results to a downloadable Excel document.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
