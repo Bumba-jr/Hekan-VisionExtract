@@ -103,6 +103,8 @@ export default function App() {
   const [selectedBatch, setSelectedBatch] = useState<{ batch: any; registrations: any[] } | null>(null);
   const [editingBatchRow, setEditingBatchRow] = useState<any | null>(null);
   const [isSavingBatchRow, setIsSavingBatchRow] = useState(false);
+  const [editingBatchName, setEditingBatchName] = useState<{ id: string; name: string } | null>(null);
+  const [isSavingBatchName, setIsSavingBatchName] = useState(false);
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
   const [globalSearchQuery, setGlobalSearchQuery] = useState('');
   const [globalSearchResults, setGlobalSearchResults] = useState<any[]>([]);
@@ -300,6 +302,28 @@ export default function App() {
       toast.error("Failed to update record");
     } finally {
       setIsSavingBatchRow(false);
+    }
+  };
+
+  const updateBatchName = async () => {
+    if (!editingBatchName?.name.trim()) return;
+    setIsSavingBatchName(true);
+    try {
+      const { error } = await supabase
+        .from('batches')
+        .update({ name: editingBatchName.name.trim() })
+        .eq('id', editingBatchName.id);
+
+      if (error) throw error;
+
+      setHistory(prev => prev.map(b => b.id === editingBatchName.id ? { ...b, name: editingBatchName.name.trim() } : b));
+      setEditingBatchName(null);
+      toast.success("Batch name updated");
+    } catch (error) {
+      console.error('Error updating batch name:', error);
+      toast.error("Failed to update batch name");
+    } finally {
+      setIsSavingBatchName(false);
     }
   };
 
@@ -1218,9 +1242,37 @@ export default function App() {
                         .filter(batch => filterDCC === 'All' || batch.name.includes(filterDCC)) // Simple filter for now
                         .map((batch) => (
                           <TableRow key={batch.id} className="hover:bg-[#F8F9FA]">
-                            <TableCell className="font-bold text-[#1E293B]">{batch.name}</TableCell>
+                            <TableCell className="font-bold text-[#1E293B]">
+                              {editingBatchName?.id === batch.id ? (
+                                <div className="flex items-center gap-1">
+                                  <Input
+                                    value={editingBatchName.name}
+                                    onChange={e => setEditingBatchName({ ...editingBatchName, name: e.target.value })}
+                                    onKeyDown={e => { if (e.key === 'Enter') updateBatchName(); if (e.key === 'Escape') setEditingBatchName(null); }}
+                                    className="h-7 text-xs w-[180px]"
+                                    autoFocus
+                                  />
+                                  <Button size="icon" variant="ghost" className="h-7 w-7 text-[#166534] hover:bg-[#DCFCE7]" disabled={isSavingBatchName} onClick={updateBatchName}>
+                                    {isSavingBatchName ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
+                                  </Button>
+                                  <Button size="icon" variant="ghost" className="h-7 w-7 text-[#94A3B8] hover:bg-[#F1F5F9]" onClick={() => setEditingBatchName(null)}>
+                                    <X className="h-3 w-3" />
+                                  </Button>
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-2 group/name">
+                                  <span>{batch.name}</span>
+                                  <button
+                                    className="opacity-0 group-hover/name:opacity-100 transition-opacity text-[#94A3B8] hover:text-[#166534]"
+                                    onClick={() => setEditingBatchName({ id: batch.id, name: batch.name })}
+                                  >
+                                    <Edit2 className="h-3 w-3" />
+                                  </button>
+                                </div>
+                              )}
+                            </TableCell>
                             <TableCell className="text-[#64748B]">
-                              {new Date(batch.created_at).toLocaleDateString()} {new Date(batch.created_at).toLocaleTimeString()}
+                              {new Date(batch.created_at).toLocaleDateString()} {new Date(batch.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}
                             </TableCell>
                             <TableCell>
                               <Badge className="bg-[#EEF2FF] text-[#6366F1] hover:bg-[#EEF2FF] border-none">
