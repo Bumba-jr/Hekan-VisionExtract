@@ -26,7 +26,11 @@ import {
   Filter,
   BarChart3,
   Calendar,
-  ChevronRight
+  ChevronRight,
+  ZoomIn,
+  ZoomOut,
+  ArrowLeft,
+  ArrowRight
 } from 'lucide-react';
 import {
   BarChart,
@@ -84,7 +88,12 @@ export default function App() {
   const [files, setFiles] = useState<FileWithStatus[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [batchName, setBatchName] = useState('HEKAN_Registration_Batch');
-  const [previewImage, setPreviewImage] = useState<{ url: string; name: string } | null>(null);
+  const [previewImage, setPreviewImage] = useState<{ url: string; name: string; index: number } | null>(null);
+  const [zoomLevel, setZoomLevel] = useState(1);
+  const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
+  const isDragging = React.useRef(false);
+  const dragStart = React.useRef({ x: 0, y: 0 });
+  const panStart = React.useRef({ x: 0, y: 0 });
   const [elapsedTime, setElapsedTime] = useState(0);
   const [editingRow, setEditingRow] = useState<{ fileId: string; rowIndex: number; data: RegistrationRow } | null>(null);
   const [history, setHistory] = useState<any[]>([]);
@@ -92,6 +101,8 @@ export default function App() {
   const [isSaving, setIsSaving] = useState(false);
   const [isBatchSaved, setIsBatchSaved] = useState(false);
   const [selectedBatch, setSelectedBatch] = useState<{ batch: any; registrations: any[] } | null>(null);
+  const [editingBatchRow, setEditingBatchRow] = useState<any | null>(null);
+  const [isSavingBatchRow, setIsSavingBatchRow] = useState(false);
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
   const [globalSearchQuery, setGlobalSearchQuery] = useState('');
   const [globalSearchResults, setGlobalSearchResults] = useState<any[]>([]);
@@ -108,6 +119,39 @@ export default function App() {
     amountTrend: []
   });
   const timerRef = React.useRef<NodeJS.Timeout | null>(null);
+
+  // Keyboard navigation for image preview
+  React.useEffect(() => {
+    if (!previewImage) return;
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        const nextIndex = previewImage.index + 1;
+        if (nextIndex < files.length) {
+          const next = files[nextIndex];
+          setPreviewImage({ url: next.preview, name: next.file.name, index: nextIndex });
+          setZoomLevel(1);
+          setPanOffset({ x: 0, y: 0 });
+        }
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        const prevIndex = previewImage.index - 1;
+        if (prevIndex >= 0) {
+          const prev = files[prevIndex];
+          setPreviewImage({ url: prev.preview, name: prev.file.name, index: prevIndex });
+          setZoomLevel(1);
+          setPanOffset({ x: 0, y: 0 });
+        }
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        setPreviewImage(null);
+        setZoomLevel(1);
+        setPanOffset({ x: 0, y: 0 });
+      }
+    };
+    window.addEventListener('keydown', handleKey, { capture: true });
+    return () => window.removeEventListener('keydown', handleKey, { capture: true });
+  }, [previewImage, files]);
 
   const fetchHistory = useCallback(async () => {
     if (!isSupabaseConfigured) return;
@@ -221,6 +265,41 @@ export default function App() {
     } catch (error) {
       console.error('Error deleting batch:', error);
       toast.error("Failed to delete batch");
+    }
+  };
+
+  const updateBatchRegistration = async (reg: any) => {
+    setIsSavingBatchRow(true);
+    try {
+      const { error } = await supabase
+        .from('registrations')
+        .update({
+          full_name: reg.full_name,
+          position: reg.position,
+          dcc: reg.dcc,
+          lcc: reg.lcc,
+          phone: reg.phone,
+          email: reg.email,
+          payment_info: reg.payment_info,
+          amount: reg.amount,
+        })
+        .eq('id', reg.id);
+
+      if (error) throw error;
+
+      // Update local state
+      setSelectedBatch(prev => prev ? {
+        ...prev,
+        registrations: prev.registrations.map(r => r.id === reg.id ? reg : r)
+      } : null);
+
+      setEditingBatchRow(null);
+      toast.success("Record updated successfully");
+    } catch (error) {
+      console.error('Error updating registration:', error);
+      toast.error("Failed to update record");
+    } finally {
+      setIsSavingBatchRow(false);
     }
   };
 
@@ -926,7 +1005,7 @@ export default function App() {
                                     <TableCell>
                                       <div
                                         className="relative w-12 h-12 rounded-lg overflow-hidden border border-[#E2E8F0] shadow-sm cursor-zoom-in hover:ring-2 hover:ring-[#166534] transition-all"
-                                        onClick={() => setPreviewImage({ url: file.preview, name: file.file.name })}
+                                        onClick={() => setPreviewImage({ url: file.preview, name: file.file.name, index: files.indexOf(file) })}
                                       >
                                         <img
                                           src={file.preview}
@@ -1377,24 +1456,59 @@ export default function App() {
                   <TableHead>Email</TableHead>
                   <TableHead>Payment Info</TableHead>
                   <TableHead className="text-right">Amount</TableHead>
+                  <TableHead className="w-[80px]"></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {selectedBatch?.registrations.map((reg, idx) => (
-                  <TableRow key={reg.id} className="hover:bg-[#F8F9FA]/50">
-                    <TableCell className="font-mono text-xs text-[#64748B]">{reg.s_no || idx + 1}</TableCell>
-                    <TableCell className="font-bold text-[#1E293B] whitespace-nowrap">{reg.full_name}</TableCell>
-                    <TableCell className="text-xs text-[#64748B]">{reg.position}</TableCell>
-                    <TableCell className="text-xs text-[#1E293B]">{reg.dcc}</TableCell>
-                    <TableCell className="text-xs text-[#94A3B8]">{reg.lcc}</TableCell>
-                    <TableCell className="text-xs text-[#1E293B] whitespace-nowrap">{reg.phone}</TableCell>
-                    <TableCell className="text-xs text-[#64748B]">{reg.email}</TableCell>
-                    <TableCell className="text-xs text-[#64748B] max-w-[180px] truncate">{reg.payment_info}</TableCell>
-                    <TableCell className="text-right font-mono font-bold text-[#166534] whitespace-nowrap">
-                      ₦{reg.amount}
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {selectedBatch?.registrations.map((reg, idx) => {
+                  const isEditing = editingBatchRow?.id === reg.id;
+                  return (
+                    <TableRow key={reg.id} className={isEditing ? 'bg-[#F0FDF4]' : 'hover:bg-[#F8F9FA]/50'}>
+                      <TableCell className="font-mono text-xs text-[#64748B]">{reg.s_no || idx + 1}</TableCell>
+                      {isEditing ? (
+                        <>
+                          <TableCell><Input value={editingBatchRow.full_name} onChange={e => setEditingBatchRow({ ...editingBatchRow, full_name: e.target.value })} className="h-7 text-xs min-w-[120px]" /></TableCell>
+                          <TableCell><Input value={editingBatchRow.position} onChange={e => setEditingBatchRow({ ...editingBatchRow, position: e.target.value })} className="h-7 text-xs min-w-[100px]" /></TableCell>
+                          <TableCell><Input value={editingBatchRow.dcc} onChange={e => setEditingBatchRow({ ...editingBatchRow, dcc: e.target.value })} className="h-7 text-xs min-w-[100px]" /></TableCell>
+                          <TableCell><Input value={editingBatchRow.lcc} onChange={e => setEditingBatchRow({ ...editingBatchRow, lcc: e.target.value })} className="h-7 text-xs min-w-[100px]" /></TableCell>
+                          <TableCell><Input value={editingBatchRow.phone} onChange={e => setEditingBatchRow({ ...editingBatchRow, phone: e.target.value })} className="h-7 text-xs min-w-[100px]" /></TableCell>
+                          <TableCell><Input value={editingBatchRow.email} onChange={e => setEditingBatchRow({ ...editingBatchRow, email: e.target.value })} className="h-7 text-xs min-w-[120px]" /></TableCell>
+                          <TableCell><Input value={editingBatchRow.payment_info} onChange={e => setEditingBatchRow({ ...editingBatchRow, payment_info: e.target.value })} className="h-7 text-xs min-w-[120px]" /></TableCell>
+                          <TableCell><Input value={editingBatchRow.amount} onChange={e => setEditingBatchRow({ ...editingBatchRow, amount: e.target.value })} className="h-7 text-xs min-w-[80px]" /></TableCell>
+                        </>
+                      ) : (
+                        <>
+                          <TableCell className="font-bold text-[#1E293B] whitespace-nowrap">{reg.full_name}</TableCell>
+                          <TableCell className="text-xs text-[#64748B]">{reg.position}</TableCell>
+                          <TableCell className="text-xs text-[#1E293B]">{reg.dcc}</TableCell>
+                          <TableCell className="text-xs text-[#94A3B8]">{reg.lcc}</TableCell>
+                          <TableCell className="text-xs text-[#1E293B] whitespace-nowrap">{reg.phone}</TableCell>
+                          <TableCell className="text-xs text-[#64748B]">{reg.email}</TableCell>
+                          <TableCell className="text-xs text-[#64748B] max-w-[180px] truncate">{reg.payment_info}</TableCell>
+                          <TableCell className="text-right font-mono font-bold text-[#166534] whitespace-nowrap">₦{reg.amount}</TableCell>
+                        </>
+                      )}
+                      <TableCell>
+                        <div className="flex items-center gap-1 justify-end">
+                          {isEditing ? (
+                            <>
+                              <Button size="icon" variant="ghost" className="h-7 w-7 text-[#166534] hover:bg-[#DCFCE7]" disabled={isSavingBatchRow} onClick={() => updateBatchRegistration(editingBatchRow)}>
+                                {isSavingBatchRow ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
+                              </Button>
+                              <Button size="icon" variant="ghost" className="h-7 w-7 text-[#94A3B8] hover:bg-[#F1F5F9]" onClick={() => setEditingBatchRow(null)}>
+                                <X className="h-3 w-3" />
+                              </Button>
+                            </>
+                          ) : (
+                            <Button size="icon" variant="ghost" className="h-7 w-7 text-[#94A3B8] hover:text-[#166534] hover:bg-[#F0FDF4]" onClick={() => setEditingBatchRow({ ...reg })}>
+                              <Edit2 className="h-3 w-3" />
+                            </Button>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           </div>
@@ -1549,19 +1663,123 @@ export default function App() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={!!previewImage} onOpenChange={(open) => !open && setPreviewImage(null)}>
-        <DialogContent className="max-w-[98vw] w-[98vw] h-[98vh] p-0 overflow-hidden bg-black/90 border-none flex flex-col">
-          <DialogHeader className="absolute top-4 left-4 z-50 bg-white/90 backdrop-blur-md p-3 rounded-xl shadow-2xl border border-white/20">
-            <DialogTitle className="text-sm font-black uppercase tracking-tight truncate max-w-[400px] text-[#0F172A]">
-              {previewImage?.name}
-            </DialogTitle>
-          </DialogHeader>
-          <div className="flex-1 w-full h-full flex items-center justify-center p-2 md:p-6">
+      <Dialog open={!!previewImage} onOpenChange={(open) => { if (!open) { setPreviewImage(null); setZoomLevel(1); setPanOffset({ x: 0, y: 0 }); } }}>
+        <DialogContent showCloseButton={false} className="max-w-[98vw] w-[98vw] sm:max-w-[98vw] h-[98vh] p-0 overflow-hidden bg-black/90 border-none flex flex-col">
+          {/* Top bar */}
+          <div className="absolute top-4 left-4 right-4 z-50 flex items-center justify-between">
+            <div className="bg-white/90 backdrop-blur-md px-3 py-2 rounded-xl shadow-2xl border border-white/20 max-w-[60%]">
+              <p className="text-xs font-black uppercase tracking-tight truncate text-[#0F172A]">
+                {previewImage?.name}
+              </p>
+              <p className="text-[10px] text-[#64748B] mt-0.5">
+                {previewImage !== null ? `${previewImage.index + 1} / ${files.length}` : ''}
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              {/* Zoom controls */}
+              <div className="flex items-center gap-1 bg-white/90 backdrop-blur-md rounded-xl shadow-2xl border border-white/20 p-1">
+                <button
+                  onClick={() => { setZoomLevel(z => Math.max(0.5, parseFloat((z - 0.25).toFixed(2)))); setPanOffset({ x: 0, y: 0 }); }}
+                  className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-[#F1F5F9] transition-colors text-[#0F172A]"
+                  title="Zoom out"
+                >
+                  <ZoomOut className="h-4 w-4" />
+                </button>
+                <span className="text-xs font-bold text-[#0F172A] w-10 text-center">
+                  {Math.round(zoomLevel * 100)}%
+                </span>
+                <button
+                  onClick={() => { setZoomLevel(z => Math.min(5, parseFloat((z + 0.25).toFixed(2)))); }}
+                  className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-[#F1F5F9] transition-colors text-[#0F172A]"
+                  title="Zoom in"
+                >
+                  <ZoomIn className="h-4 w-4" />
+                </button>
+              </div>
+              {/* Close button */}
+              <button
+                onClick={() => { setPreviewImage(null); setZoomLevel(1); setPanOffset({ x: 0, y: 0 }); }}
+                className="w-9 h-9 flex items-center justify-center bg-white/90 backdrop-blur-md rounded-xl shadow-2xl border border-white/20 hover:bg-white transition-colors text-[#0F172A]"
+                title="Close"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+
+          {/* Left arrow */}
+          {previewImage && previewImage.index > 0 && (
+            <button
+              onClick={() => {
+                const prevIndex = previewImage.index - 1;
+                const prev = files[prevIndex];
+                setPreviewImage({ url: prev.preview, name: prev.file.name, index: prevIndex });
+                setZoomLevel(1);
+                setPanOffset({ x: 0, y: 0 });
+              }}
+              className="absolute left-4 top-1/2 -translate-y-1/2 z-50 w-10 h-10 flex items-center justify-center bg-white/90 backdrop-blur-md rounded-xl shadow-2xl border border-white/20 hover:bg-white transition-colors text-[#0F172A]"
+              title="Previous image (←)"
+            >
+              <ArrowLeft className="h-5 w-5" />
+            </button>
+          )}
+
+          {/* Right arrow */}
+          {previewImage && previewImage.index < files.length - 1 && (
+            <button
+              onClick={() => {
+                const nextIndex = previewImage.index + 1;
+                const next = files[nextIndex];
+                setPreviewImage({ url: next.preview, name: next.file.name, index: nextIndex });
+                setZoomLevel(1);
+                setPanOffset({ x: 0, y: 0 });
+              }}
+              className="absolute right-4 top-1/2 -translate-y-1/2 z-50 w-10 h-10 flex items-center justify-center bg-white/90 backdrop-blur-md rounded-xl shadow-2xl border border-white/20 hover:bg-white transition-colors text-[#0F172A]"
+              title="Next image (→)"
+            >
+              <ArrowRight className="h-5 w-5" />
+            </button>
+          )}
+
+          {/* Click outside overlay to close */}
+          <div
+            className="absolute inset-0 z-10"
+            onClick={() => { setPreviewImage(null); setZoomLevel(1); setPanOffset({ x: 0, y: 0 }); }}
+          />
+
+          {/* Image container — drag to pan when zoomed */}
+          <div
+            className="flex-1 w-full h-full flex items-center justify-center overflow-hidden p-16 relative z-20"
+            style={{ cursor: zoomLevel > 1 ? (isDragging.current ? 'grabbing' : 'grab') : 'default' }}
+            onMouseDown={(e) => {
+              if (zoomLevel <= 1) return;
+              isDragging.current = true;
+              dragStart.current = { x: e.clientX, y: e.clientY };
+              panStart.current = { x: panOffset.x, y: panOffset.y };
+              e.preventDefault();
+            }}
+            onMouseMove={(e) => {
+              if (!isDragging.current) return;
+              const dx = e.clientX - dragStart.current.x;
+              const dy = e.clientY - dragStart.current.y;
+              setPanOffset({ x: panStart.current.x + dx, y: panStart.current.y + dy });
+            }}
+            onMouseUp={() => { isDragging.current = false; }}
+            onMouseLeave={() => { isDragging.current = false; }}
+          >
             {previewImage && (
               <img
                 src={previewImage.url}
                 alt={previewImage.name}
-                className="max-w-full max-h-full object-contain shadow-2xl rounded-sm transition-transform duration-300"
+                onClick={(e) => e.stopPropagation()}
+                draggable={false}
+                style={{
+                  transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoomLevel})`,
+                  transformOrigin: 'center center',
+                  transition: isDragging.current ? 'none' : 'transform 0.2s ease',
+                  userSelect: 'none',
+                }}
+                className="object-contain shadow-2xl rounded-sm max-w-full max-h-full"
                 referrerPolicy="no-referrer"
               />
             )}
