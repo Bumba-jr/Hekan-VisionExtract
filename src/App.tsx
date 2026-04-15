@@ -95,6 +95,8 @@ export default function App() {
   const dragStart = React.useRef({ x: 0, y: 0 });
   const panStart = React.useRef({ x: 0, y: 0 });
   const [elapsedTime, setElapsedTime] = useState(0);
+  const [estimatedTotal, setEstimatedTotal] = useState(0);
+  const processingStartTime = React.useRef<number>(0);
   const [editingRow, setEditingRow] = useState<{ fileId: string; rowIndex: number; data: RegistrationRow } | null>(null);
   const [history, setHistory] = useState<any[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
@@ -378,13 +380,18 @@ export default function App() {
 
     setIsProcessing(true);
     setElapsedTime(0);
+    setEstimatedTotal(0);
+    processingStartTime.current = Date.now();
+
+    const pendingFiles = files.filter(f => f.status === 'pending' || f.status === 'error');
+
+    // Estimate ~20s per image as initial estimate
+    setEstimatedTotal(pendingFiles.length * 20);
 
     // Start global timer
     timerRef.current = setInterval(() => {
-      setElapsedTime(prev => prev + 1);
-    }, 1000);
-
-    const pendingFiles = files.filter(f => f.status === 'pending' || f.status === 'error');
+      setElapsedTime(Math.floor((Date.now() - processingStartTime.current) / 1000));
+    }, 500);
 
     for (const fileStatus of pendingFiles) {
       setFiles(prev => prev.map(f =>
@@ -424,6 +431,13 @@ export default function App() {
         setFiles(prev => prev.map(f =>
           f.id === fileStatus.id ? { ...f, status: 'completed', result, progress: 100 } : f
         ));
+
+        // Recalculate ETA based on actual time per file so far
+        const elapsed = (Date.now() - processingStartTime.current) / 1000;
+        const completedSoFar = files.filter(f => f.status === 'completed').length + 1;
+        const avgPerFile = elapsed / completedSoFar;
+        const remaining = pendingFiles.length - completedSoFar;
+        setEstimatedTotal(Math.round(elapsed + avgPerFile * remaining));
       } catch (error) {
         console.error(error);
         setFiles(prev => prev.map(f =>
@@ -957,25 +971,52 @@ export default function App() {
 
                     {isProcessing && (
                       <div className="space-y-4 pt-2">
-                        <div className="p-3 bg-[#FFFBEB] rounded-lg border border-[#FEF3C7] flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <Clock className="h-4 w-4 text-[#D97706] animate-pulse" />
-                            <span className="text-xs font-bold text-[#D97706] uppercase">Time Elapsed</span>
+                        <div className="p-3 bg-[#FFFBEB] rounded-lg border border-[#FEF3C7] space-y-2">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <Clock className="h-4 w-4 text-[#D97706] animate-pulse" />
+                              <span className="text-xs font-bold text-[#D97706] uppercase">Elapsed</span>
+                            </div>
+                            <span className="text-sm font-mono font-bold text-[#D97706]">{formatTime(elapsedTime)}</span>
                           </div>
-                          <span className="text-sm font-mono font-bold text-[#D97706]">{formatTime(elapsedTime)}</span>
+                          {estimatedTotal > 0 && elapsedTime < estimatedTotal && (
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-bold text-[#92400E] uppercase">Est. Remaining</span>
+                              <span className="text-sm font-mono font-bold text-[#92400E]">
+                                ~{formatTime(Math.max(0, estimatedTotal - elapsedTime))}
+                              </span>
+                            </div>
+                          )}
                         </div>
 
                         <div className="space-y-2">
                           <div className="flex justify-between text-xs font-bold uppercase text-[#64748B]">
                             <span>Batch Progress</span>
                             <span>
-                              {Math.round((files.filter(f => f.status === 'completed').length / files.length) * 100)}%
+                              {files.filter(f => f.status === 'completed').length}/{files.length} files
                             </span>
                           </div>
                           <Progress
-                            value={(files.filter(f => f.status === 'completed').length / files.length) * 100}
+                            value={
+                              files.length === 0 ? 0 :
+                                files.reduce((acc, f) => {
+                                  if (f.status === 'completed') return acc + 100;
+                                  if (f.status === 'processing') return acc + f.progress;
+                                  return acc;
+                                }, 0) / files.length
+                            }
                             className="h-2 bg-[#E2E8F0]"
                           />
+                          <p className="text-[10px] text-[#94A3B8] text-right">
+                            {Math.round(
+                              files.length === 0 ? 0 :
+                                files.reduce((acc, f) => {
+                                  if (f.status === 'completed') return acc + 100;
+                                  if (f.status === 'processing') return acc + f.progress;
+                                  return acc;
+                                }, 0) / files.length
+                            )}% complete
+                          </p>
                         </div>
                       </div>
                     )}
