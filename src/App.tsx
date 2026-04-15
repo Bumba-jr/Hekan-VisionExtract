@@ -1344,7 +1344,7 @@ export default function App() {
 
       {/* Batch Details Dialog */}
       <Dialog open={!!selectedBatch} onOpenChange={(open) => !open && setSelectedBatch(null)}>
-        <DialogContent className="w-[95vw] max-w-[95vw] max-h-[90vh] overflow-hidden flex flex-col">
+        <DialogContent className="w-[95vw] max-w-[95vw] sm:max-w-[95vw] max-h-[90vh] overflow-hidden flex flex-col">
           <DialogHeader>
             <DialogTitle className="flex items-center justify-between pr-8">
               <div className="flex items-center gap-3">
