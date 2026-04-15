@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
+import BatchSpotlight from './BatchSpotlight';
 import { ParentSize } from '@visx/responsive';
 import { Group } from '@visx/group';
 import { Bar, LinePath, Pie } from '@visx/shape';
@@ -351,6 +352,9 @@ function LccBarChart({ data }: { data: any[] }) {
     );
 }
 
+// ── Batch Spotlight Card ──────────────────────────────────────────────────────
+// Replaced by BatchSpotlight.tsx
+
 // ── Main Export ───────────────────────────────────────────────────────────────
 interface Props {
     history: any[];
@@ -386,19 +390,8 @@ export default function AnalyticsSection({ history, analyticsData }: Props) {
 
     return (
         <div className="space-y-6" translate="no">
-            {/* KPI Cards */}
-            <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
-                {kpis.map((k, i) => (
-                    <div key={i} className="bg-white rounded-2xl border border-[#E2E8F0] p-4 flex items-center gap-3 shadow-sm hover:shadow-md transition-shadow">
-                        <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ backgroundColor: k.bg, color: k.color }}>{k.icon}</div>
-                        <div className="min-w-0">
-                            <p className="text-[10px] font-bold text-[#94A3B8] uppercase tracking-wider truncate">{k.label}</p>
-                            <p className="text-xl font-black text-[#0F172A] leading-tight truncate">{k.value}</p>
-                            {k.sub && <p className="text-[10px] text-[#94A3B8] truncate">{k.sub}</p>}
-                        </div>
-                    </div>
-                ))}
-            </div>
+            {/* Batch Spotlight */}
+            <BatchSpotlight history={history} />
 
             {/* Batch Performance */}
             <div className="bg-white rounded-2xl border border-[#E2E8F0] shadow-sm p-6">
