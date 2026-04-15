@@ -74,6 +74,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { extractTextFromImage, ExtractedData, RegistrationRow } from './lib/gemini';
 import { cn } from '@/lib/utils';
 import { supabase, isSupabaseConfigured } from './lib/supabase';
+import AnalyticsSection from './components/AnalyticsSection';
 
 interface FileWithStatus {
   id: string;
@@ -115,12 +116,18 @@ export default function App() {
   const [filterLCC, setFilterLCC] = useState('All');
   const [analyticsData, setAnalyticsData] = useState<{
     dccDistribution: any[];
+    lccDistribution: any[];
     registrationTrend: any[];
     amountTrend: any[];
+    topBatch: any | null;
+    avgAmount: number;
   }>({
     dccDistribution: [],
+    lccDistribution: [],
     registrationTrend: [],
-    amountTrend: []
+    amountTrend: [],
+    topBatch: null,
+    avgAmount: 0,
   });
   const timerRef = React.useRef<NodeJS.Timeout | null>(null);
 
@@ -161,42 +168,80 @@ export default function App() {
     if (!isSupabaseConfigured) return;
     setIsLoadingHistory(true);
     try {
-      const { data, error } = await supabase
+      // Fetch batches
+      const { data: batches, error } = await supabase
         .from('batches')
         .select('*')
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      setHistory(data || []);
+      setHistory(batches || []);
 
-      // Prepare analytics data
-      if (data && data.length > 0) {
-        const trend = data.slice().reverse().map(b => ({
-          name: b.name.length > 10 ? b.name.substring(0, 10) + '...' : b.name,
+      if (batches && batches.length > 0) {
+        // Trend data (oldest → newest for charts)
+        const stripPrefix = (name: string) => name.replace(/^HEKAN_Registration_Batch_?/i, '').trim() || name;
+        const trend = batches.slice().reverse().map((b, i) => ({
+          name: stripPrefix(b.name).length > 12 ? stripPrefix(b.name).substring(0, 12) + '…' : stripPrefix(b.name),
+          fullName: b.name,
+          key: `batch-${i}`,
           registrants: b.registrant_count,
           amount: b.total_amount,
           date: new Date(b.created_at).toLocaleDateString()
         }));
 
-        // Fetch DCC distribution
+        // Fetch all registrations for DCC/LCC breakdown
         const { data: regData } = await supabase
           .from('registrations')
-          .select('dcc');
+          .select('dcc, lcc, amount');
 
         if (regData) {
+          // DCC distribution
           const dccCounts: Record<string, number> = {};
+          const lccCounts: Record<string, number> = {};
+          let totalAmountSum = 0;
+          let amountCount = 0;
+
           regData.forEach(r => {
-            const dcc = r.dcc || 'Unknown';
+            const dcc = r.dcc?.trim() || 'Unknown';
             dccCounts[dcc] = (dccCounts[dcc] || 0) + 1;
+
+            const lcc = r.lcc?.trim() || 'Unknown';
+            lccCounts[lcc] = (lccCounts[lcc] || 0) + 1;
+
+            const amt = parseFloat(r.amount?.replace(/[^0-9.]/g, '') || '0') || 0;
+            if (amt > 0) { totalAmountSum += amt; amountCount++; }
           });
 
-          const dccDist = Object.entries(dccCounts).map(([name, value]) => ({ name, value }));
+          const dccDist = Object.entries(dccCounts)
+            .map(([name, value]) => ({ name, value }))
+            .sort((a, b) => b.value - a.value);
+
+          const lccDist = Object.entries(lccCounts)
+            .map(([name, value]) => ({ name, value }))
+            .sort((a, b) => b.value - a.value)
+            .slice(0, 10); // top 10 LCCs
+
+          const topBatch = batches.reduce((top, b) =>
+            (b.registrant_count > (top?.registrant_count || 0)) ? b : top, null as any);
+
           setAnalyticsData({
             dccDistribution: dccDist,
+            lccDistribution: lccDist,
             registrationTrend: trend,
-            amountTrend: trend
+            amountTrend: trend,
+            topBatch,
+            avgAmount: amountCount > 0 ? Math.round(totalAmountSum / amountCount) : 0,
           });
         }
+      } else {
+        setAnalyticsData({
+          dccDistribution: [],
+          lccDistribution: [],
+          registrationTrend: [],
+          amountTrend: [],
+          topBatch: null,
+          avgAmount: 0,
+        });
       }
     } catch (error) {
       console.error('Error fetching history:', error);
@@ -236,6 +281,19 @@ export default function App() {
 
   React.useEffect(() => {
     fetchHistory();
+  }, [fetchHistory]);
+
+  // Realtime subscription — refetch analytics whenever batches or registrations change
+  React.useEffect(() => {
+    if (!isSupabaseConfigured) return;
+
+    const channel = supabase
+      .channel('analytics-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'batches' }, () => fetchHistory())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'registrations' }, () => fetchHistory())
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
   }, [fetchHistory]);
 
   const fetchBatchDetails = async (batch: any) => {
@@ -680,7 +738,7 @@ export default function App() {
   const totalAmount = historyAmount + currentAmount;
 
   return (
-    <div className="min-h-screen bg-[#F8F9FA] text-[#1A1A1A] font-sans p-4 md:p-8">
+    <div className="min-h-screen bg-[#F8F9FA] text-[#1A1A1A] font-sans p-4 md:p-8" translate="no">
       <Toaster position="top-center" />
 
       <div className="max-w-7xl mx-auto space-y-8">
@@ -1427,89 +1485,8 @@ export default function App() {
             </Card>
           </TabsContent>
 
-          <TabsContent value="analytics" className="m-0">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-              <Card className="border-[#E2E8F0] shadow-sm overflow-hidden">
-                <CardHeader>
-                  <CardTitle className="text-lg flex items-center gap-2">
-                    <TrendingUp className="h-5 w-5 text-[#166534]" />
-                    Registration Trend
-                  </CardTitle>
-                  <CardDescription>Number of registrants per batch over time</CardDescription>
-                </CardHeader>
-                <CardContent className="h-[300px] pt-4">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={analyticsData.registrationTrend}>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1F5F9" />
-                      <XAxis dataKey="name" fontSize={10} tickLine={false} axisLine={false} />
-                      <YAxis fontSize={10} tickLine={false} axisLine={false} />
-                      <Tooltip
-                        contentStyle={{ backgroundColor: '#fff', borderRadius: '8px', border: '1px solid #E2E8F0', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                        cursor={{ fill: '#F8F9FA' }}
-                      />
-                      <Bar dataKey="registrants" fill="#166534" radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </CardContent>
-              </Card>
-
-              <Card className="border-[#E2E8F0] shadow-sm overflow-hidden">
-                <CardHeader>
-                  <CardTitle className="text-lg flex items-center gap-2">
-                    <DollarSign className="h-5 w-5 text-[#10B981]" />
-                    Revenue Growth
-                  </CardTitle>
-                  <CardDescription>Total amount collected per batch</CardDescription>
-                </CardHeader>
-                <CardContent className="h-[300px] pt-4">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={analyticsData.amountTrend}>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1F5F9" />
-                      <XAxis dataKey="name" fontSize={10} tickLine={false} axisLine={false} />
-                      <YAxis fontSize={10} tickLine={false} axisLine={false} />
-                      <Tooltip
-                        contentStyle={{ backgroundColor: '#fff', borderRadius: '8px', border: '1px solid #E2E8F0', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                      />
-                      <Line type="monotone" dataKey="amount" stroke="#10B981" strokeWidth={3} dot={{ fill: '#10B981', strokeWidth: 2, r: 4 }} activeDot={{ r: 6 }} />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </CardContent>
-              </Card>
-
-              <Card className="border-[#E2E8F0] shadow-sm overflow-hidden lg:col-span-2">
-                <CardHeader>
-                  <CardTitle className="text-lg flex items-center gap-2">
-                    <Users className="h-5 w-5 text-[#6366F1]" />
-                    DCC Distribution
-                  </CardTitle>
-                  <CardDescription>Breakdown of registrants by District Church Council</CardDescription>
-                </CardHeader>
-                <CardContent className="h-[400px] pt-4">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={analyticsData.dccDistribution}
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={80}
-                        outerRadius={140}
-                        paddingAngle={5}
-                        dataKey="value"
-                        label={({ name, percent }) => `${name} (${(percent * 100).toFixed(0)}%)`}
-                      >
-                        {analyticsData.dccDistribution.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={['#166534', '#10B981', '#F59E0B', '#EA580C', '#6366F1', '#8B5CF6', '#EC4899'][index % 7]} />
-                        ))}
-                      </Pie>
-                      <Tooltip
-                        contentStyle={{ backgroundColor: '#fff', borderRadius: '8px', border: '1px solid #E2E8F0' }}
-                      />
-                      <Legend verticalAlign="bottom" height={36} />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </CardContent>
-              </Card>
-            </div>
+          <TabsContent value="analytics" className="m-0" translate="no">
+            <AnalyticsSection history={history} analyticsData={analyticsData} />
           </TabsContent>
         </Tabs>
       </div>
