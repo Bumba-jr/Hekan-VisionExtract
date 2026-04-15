@@ -119,15 +119,27 @@ export default function App() {
     lccDistribution: any[];
     registrationTrend: any[];
     amountTrend: any[];
+    cumulativeTrend: any[];
     topBatch: any | null;
     avgAmount: number;
+    positionDistribution: any[];
+    paymentMethodDistribution: any[];
+    revenuePerRegistrant: any[];
+    topDCCs: any[];
+    growthRates: any[];
   }>({
     dccDistribution: [],
     lccDistribution: [],
     registrationTrend: [],
     amountTrend: [],
+    cumulativeTrend: [],
     topBatch: null,
     avgAmount: 0,
+    positionDistribution: [],
+    paymentMethodDistribution: [],
+    revenuePerRegistrant: [],
+    topDCCs: [],
+    growthRates: [],
   });
   const timerRef = React.useRef<NodeJS.Timeout | null>(null);
 
@@ -189,15 +201,16 @@ export default function App() {
           date: new Date(b.created_at).toLocaleDateString()
         }));
 
-        // Fetch all registrations for DCC/LCC breakdown
+        // Fetch all registrations for DCC/LCC/position/payment breakdown
         const { data: regData } = await supabase
           .from('registrations')
-          .select('dcc, lcc, amount');
+          .select('dcc, lcc, amount, position, payment_info, full_name, batch_id');
 
         if (regData) {
-          // DCC distribution
           const dccCounts: Record<string, number> = {};
           const lccCounts: Record<string, number> = {};
+          const positionCounts: Record<string, number> = {};
+          const paymentCounts: Record<string, number> = {};
           let totalAmountSum = 0;
           let amountCount = 0;
 
@@ -207,6 +220,17 @@ export default function App() {
 
             const lcc = r.lcc?.trim() || 'Unknown';
             lccCounts[lcc] = (lccCounts[lcc] || 0) + 1;
+
+            const pos = r.position?.trim() || 'Unknown';
+            positionCounts[pos] = (positionCounts[pos] || 0) + 1;
+
+            // Classify payment method
+            const pi = (r.payment_info || '').toLowerCase();
+            const method = pi.includes('cash') ? 'Cash'
+              : (pi.includes('pos') || pi.includes('bank') || pi.includes('transfer') || pi.match(/\d{6,}/)) ? 'POS/Bank'
+                : pi === '' || pi === '-' ? 'Unknown'
+                  : 'Other';
+            paymentCounts[method] = (paymentCounts[method] || 0) + 1;
 
             const amt = parseFloat(r.amount?.replace(/[^0-9.]/g, '') || '0') || 0;
             if (amt > 0) { totalAmountSum += amt; amountCount++; }
@@ -219,18 +243,59 @@ export default function App() {
           const lccDist = Object.entries(lccCounts)
             .map(([name, value]) => ({ name, value }))
             .sort((a, b) => b.value - a.value)
-            .slice(0, 10); // top 10 LCCs
+            .slice(0, 10);
+
+          const positionDist = Object.entries(positionCounts)
+            .map(([name, value]) => ({ name, value }))
+            .sort((a, b) => b.value - a.value)
+            .slice(0, 10);
+
+          const paymentDist = Object.entries(paymentCounts)
+            .map(([name, value]) => ({ name, value }))
+            .sort((a, b) => b.value - a.value);
 
           const topBatch = batches.reduce((top, b) =>
             (b.registrant_count > (top?.registrant_count || 0)) ? b : top, null as any);
+
+          // Cumulative trend (running totals)
+          let cumReg = 0, cumAmt = 0;
+          const cumulativeTrend = trend.map(t => {
+            cumReg += t.registrants;
+            cumAmt += t.amount;
+            return { ...t, cumRegistrants: cumReg, cumAmount: cumAmt };
+          });
+
+          // Revenue per registrant per batch
+          const revenuePerRegistrant = trend.map(t => ({
+            ...t,
+            avgRevenue: t.registrants > 0 ? Math.round(t.amount / t.registrants) : 0,
+          }));
+
+          // Growth rates between batches
+          const growthRates = trend.map((t, i) => {
+            if (i === 0) return { ...t, regGrowth: 0, amtGrowth: 0 };
+            const prev = trend[i - 1];
+            const regGrowth = prev.registrants > 0 ? Math.round(((t.registrants - prev.registrants) / prev.registrants) * 100) : 0;
+            const amtGrowth = prev.amount > 0 ? Math.round(((t.amount - prev.amount) / prev.amount) * 100) : 0;
+            return { ...t, regGrowth, amtGrowth };
+          });
+
+          // Top DCCs leaderboard
+          const topDCCs = dccDist.slice(0, 10);
 
           setAnalyticsData({
             dccDistribution: dccDist,
             lccDistribution: lccDist,
             registrationTrend: trend,
             amountTrend: trend,
+            cumulativeTrend,
             topBatch,
             avgAmount: amountCount > 0 ? Math.round(totalAmountSum / amountCount) : 0,
+            positionDistribution: positionDist,
+            paymentMethodDistribution: paymentDist,
+            revenuePerRegistrant,
+            topDCCs,
+            growthRates,
           });
         }
       } else {
@@ -239,8 +304,14 @@ export default function App() {
           lccDistribution: [],
           registrationTrend: [],
           amountTrend: [],
+          cumulativeTrend: [],
           topBatch: null,
           avgAmount: 0,
+          positionDistribution: [],
+          paymentMethodDistribution: [],
+          revenuePerRegistrant: [],
+          topDCCs: [],
+          growthRates: [],
         });
       }
     } catch (error) {
@@ -928,22 +999,25 @@ export default function App() {
 
         {/* Main Content */}
         <Tabs defaultValue="extract" className="space-y-8">
-          <TabsList className="bg-white border border-[#E2E8F0] p-1 h-12 rounded-xl">
-            <TabsTrigger value="extract" className="rounded-lg px-6 data-[state=active]:bg-[#166534] data-[state=active]:text-white">
-              <FileText className="h-4 w-4 mr-2" />
-              Extraction Tool
+          <TabsList className="bg-white border border-[#E2E8F0] p-1 rounded-xl flex w-full overflow-x-auto scrollbar-none h-auto min-h-[52px]">
+            <TabsTrigger value="extract" className="rounded-lg px-3 md:px-6 data-[state=active]:bg-[#166534] data-[state=active]:text-white flex-shrink-0 flex items-center gap-1.5 text-xs md:text-sm py-2">
+              <FileText className="h-4 w-4 flex-shrink-0" />
+              <span className="hidden sm:inline">Extraction Tool</span>
+              <span className="sm:hidden">Extract</span>
             </TabsTrigger>
-            <TabsTrigger value="history" className="rounded-lg px-6 data-[state=active]:bg-[#166534] data-[state=active]:text-white">
-              <History className="h-4 w-4 mr-2" />
-              Batch History
+            <TabsTrigger value="history" className="rounded-lg px-3 md:px-6 data-[state=active]:bg-[#166534] data-[state=active]:text-white flex-shrink-0 flex items-center gap-1.5 text-xs md:text-sm py-2">
+              <History className="h-4 w-4 flex-shrink-0" />
+              <span className="hidden sm:inline">Batch History</span>
+              <span className="sm:hidden">History</span>
             </TabsTrigger>
-            <TabsTrigger value="search" className="rounded-lg px-6 data-[state=active]:bg-[#166534] data-[state=active]:text-white">
-              <Search className="h-4 w-4 mr-2" />
-              Global Search
+            <TabsTrigger value="search" className="rounded-lg px-3 md:px-6 data-[state=active]:bg-[#166534] data-[state=active]:text-white flex-shrink-0 flex items-center gap-1.5 text-xs md:text-sm py-2">
+              <Search className="h-4 w-4 flex-shrink-0" />
+              <span className="hidden sm:inline">Global Search</span>
+              <span className="sm:hidden">Search</span>
             </TabsTrigger>
-            <TabsTrigger value="analytics" className="rounded-lg px-6 data-[state=active]:bg-[#166534] data-[state=active]:text-white">
-              <BarChart3 className="h-4 w-4 mr-2" />
-              Analytics
+            <TabsTrigger value="analytics" className="rounded-lg px-3 md:px-6 data-[state=active]:bg-[#166534] data-[state=active]:text-white flex-shrink-0 flex items-center gap-1.5 text-xs md:text-sm py-2">
+              <BarChart3 className="h-4 w-4 flex-shrink-0" />
+              <span>Analytics</span>
             </TabsTrigger>
           </TabsList>
 

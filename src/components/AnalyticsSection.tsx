@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import BatchSpotlight from './BatchSpotlight';
+import { DateRangeFilter, CumulativeLineChart, PositionDonutChart, RevenuePerRegChart, GrowthRateChart, BatchComparison, TopDCCsLeaderboard } from './AnalyticsCharts';
 import { ParentSize } from '@visx/responsive';
 import { Group } from '@visx/group';
 import { Bar, LinePath, Pie } from '@visx/shape';
@@ -363,12 +364,20 @@ interface Props {
         lccDistribution: any[];
         registrationTrend: any[];
         amountTrend: any[];
+        cumulativeTrend: any[];
         topBatch: any | null;
         avgAmount: number;
+        positionDistribution: any[];
+        paymentMethodDistribution: any[];
+        revenuePerRegistrant: any[];
+        topDCCs: any[];
+        growthRates: any[];
     };
 }
 
 export default function AnalyticsSection({ history, analyticsData }: Props) {
+    const [filteredTrend, setFilteredTrend] = useState<any[] | null>(null);
+    const trendData = filteredTrend ?? analyticsData.registrationTrend;
     if (analyticsData.registrationTrend.length === 0) {
         return (
             <div className="flex flex-col items-center justify-center h-[400px] text-[#94A3B8] bg-white rounded-2xl border border-[#E2E8F0]">
@@ -405,7 +414,7 @@ export default function AnalyticsSection({ history, analyticsData }: Props) {
                         <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-[#10B981] inline-block" />Revenue (₦)</span>
                     </div>
                 </div>
-                <BatchBarChart data={analyticsData.registrationTrend} />
+                <BatchBarChart data={trendData} />
             </div>
 
             {/* Revenue Trend + DCC */}
@@ -415,7 +424,7 @@ export default function AnalyticsSection({ history, analyticsData }: Props) {
                         <h3 className="text-base font-black text-[#0F172A]">Revenue Trend</h3>
                         <p className="text-xs text-[#94A3B8] mt-0.5">Collection over time</p>
                     </div>
-                    <RevenueLineChart data={analyticsData.amountTrend} />
+                    <RevenueLineChart data={trendData} />
                 </div>
 
                 <div className="lg:col-span-2 bg-white rounded-2xl border border-[#E2E8F0] shadow-sm p-6">
@@ -426,13 +435,13 @@ export default function AnalyticsSection({ history, analyticsData }: Props) {
                     {analyticsData.dccDistribution.length === 0 ? (
                         <div className="flex items-center justify-center h-[200px] text-[#94A3B8] text-sm">No DCC data</div>
                     ) : (
-                        <div className="flex gap-4 items-start">
+                        <div className="flex flex-col sm:flex-row gap-4 items-start">
                             {/* Donut — fixed width so legend has room */}
-                            <div style={{ width: 160, flexShrink: 0 }}>
+                            <div className="mx-auto sm:mx-0" style={{ width: '100%', maxWidth: 160, flexShrink: 0 }}>
                                 <DccDonutChart data={analyticsData.dccDistribution} />
                             </div>
                             {/* Legend */}
-                            <div className="flex-1 space-y-2 overflow-y-auto" style={{ maxHeight: 200 }}>
+                            <div className="flex-1 space-y-2 overflow-y-auto w-full" style={{ maxHeight: 200 }}>
                                 {analyticsData.dccDistribution.map((d, i) => {
                                     const tot = analyticsData.dccDistribution.reduce((s, x) => s + x.value, 0);
                                     const pct = tot ? Math.round((d.value / tot) * 100) : 0;
@@ -459,6 +468,145 @@ export default function AnalyticsSection({ history, analyticsData }: Props) {
                         <p className="text-xs text-[#94A3B8] mt-0.5">Registrants by LCC (top 10)</p>
                     </div>
                     <LccBarChart data={analyticsData.lccDistribution} />
+                </div>
+            )}
+
+            {/* Date Range Filter */}
+            <DateRangeFilter history={history} onFilter={(filtered) => {
+                // Re-derive trend from filtered history
+                const sp = (n: string) => n.replace(/^HEKAN_Registration_Batch_?/i, '').trim() || n;
+                const t = filtered.slice().reverse().map((b: any, i: number) => ({
+                    name: sp(b.name).length > 12 ? sp(b.name).substring(0, 12) + '…' : sp(b.name),
+                    fullName: b.name, key: `f-${i}`,
+                    registrants: b.registrant_count, amount: b.total_amount,
+                    date: new Date(b.created_at).toLocaleDateString()
+                }));
+                setFilteredTrend(t);
+            }} />
+
+            {/* Cumulative Running Total */}
+            {analyticsData.cumulativeTrend.length > 0 && (
+                <div className="bg-white rounded-2xl border border-[#E2E8F0] shadow-sm p-6">
+                    <div className="flex items-center justify-between mb-4">
+                        <div>
+                            <h3 className="text-base font-black text-[#0F172A]">Running Total</h3>
+                            <p className="text-xs text-[#94A3B8] mt-0.5">Cumulative registrants and revenue over time</p>
+                        </div>
+                        <div className="flex items-center gap-4 text-xs font-bold">
+                            <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-[#166534] inline-block" />Registrants</span>
+                            <span className="flex items-center gap-1.5"><span className="w-8 h-0.5 bg-[#6366F1] inline-block" style={{ borderTop: '2px dashed #6366F1' }} />Revenue</span>
+                        </div>
+                    </div>
+                    <CumulativeLineChart data={analyticsData.cumulativeTrend} />
+                </div>
+            )}
+
+            {/* Position + Payment Method */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {analyticsData.positionDistribution.length > 0 && (
+                    <div className="bg-white rounded-2xl border border-[#E2E8F0] shadow-sm p-6">
+                        <div className="mb-4">
+                            <h3 className="text-base font-black text-[#0F172A]">Position Breakdown</h3>
+                            <p className="text-xs text-[#94A3B8] mt-0.5">Registrants by church position</p>
+                        </div>
+                        <div className="flex flex-col sm:flex-row gap-4 items-start">
+                            <div className="mx-auto sm:mx-0" style={{ width: '100%', maxWidth: 160, flexShrink: 0 }}>
+                                <PositionDonutChart data={analyticsData.positionDistribution} />
+                            </div>
+                            <div className="flex-1 space-y-2 overflow-y-auto w-full" style={{ maxHeight: 180 }}>
+                                {analyticsData.positionDistribution.map((d: any, i: number) => {
+                                    const tot = analyticsData.positionDistribution.reduce((s: number, x: any) => s + x.value, 0);
+                                    const pct = tot ? Math.round((d.value / tot) * 100) : 0;
+                                    return (
+                                        <div key={i} className="flex items-center gap-2">
+                                            <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: COLORS[i % COLORS.length] }} />
+                                            <span className="text-xs text-[#475569] truncate flex-1">{d.name}</span>
+                                            <span className="text-xs font-bold text-[#0F172A]">{d.value}</span>
+                                            <span className="text-[10px] text-[#94A3B8] w-8 text-right">{pct}%</span>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {analyticsData.paymentMethodDistribution.length > 0 && (
+                    <div className="bg-white rounded-2xl border border-[#E2E8F0] shadow-sm p-6">
+                        <div className="mb-4">
+                            <h3 className="text-base font-black text-[#0F172A]">Payment Methods</h3>
+                            <p className="text-xs text-[#94A3B8] mt-0.5">Cash vs POS/Bank breakdown</p>
+                        </div>
+                        <div className="space-y-4 mt-2">
+                            {analyticsData.paymentMethodDistribution.map((d: any, i: number) => {
+                                const tot = analyticsData.paymentMethodDistribution.reduce((s: number, x: any) => s + x.value, 0);
+                                const pct = tot ? Math.round((d.value / tot) * 100) : 0;
+                                const color = ['#166534', '#6366F1', '#F59E0B', '#94A3B8'][i] || '#94A3B8';
+                                return (
+                                    <div key={i}>
+                                        <div className="flex justify-between text-xs mb-1.5">
+                                            <span className="font-bold text-[#0F172A] flex items-center gap-2">
+                                                <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: color, display: 'inline-block' }} />
+                                                {d.name}
+                                            </span>
+                                            <span className="font-bold text-[#0F172A]">{d.value} <span className="text-[#94A3B8] font-normal">({pct}%)</span></span>
+                                        </div>
+                                        <div className="h-3 bg-[#F1F5F9] rounded-full overflow-hidden">
+                                            <div className="h-full rounded-full transition-all duration-700" style={{ width: `${pct}%`, backgroundColor: color }} />
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
+            </div>
+
+            {/* Batch Comparison */}
+            {history.length >= 2 && (
+                <div className="bg-white rounded-2xl border border-[#E2E8F0] shadow-sm p-6">
+                    <div className="mb-5">
+                        <h3 className="text-base font-black text-[#0F172A]">Batch Comparison</h3>
+                        <p className="text-xs text-[#94A3B8] mt-0.5">Compare any two batches side by side</p>
+                    </div>
+                    <BatchComparison history={history} />
+                </div>
+            )}
+
+            {/* Revenue per Registrant + Growth Rate */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {analyticsData.revenuePerRegistrant.length > 0 && (
+                    <div className="bg-white rounded-2xl border border-[#E2E8F0] shadow-sm p-6">
+                        <div className="mb-4">
+                            <h3 className="text-base font-black text-[#0F172A]">Revenue per Registrant</h3>
+                            <p className="text-xs text-[#94A3B8] mt-0.5">Average payment per person per batch</p>
+                        </div>
+                        <RevenuePerRegChart data={analyticsData.revenuePerRegistrant} />
+                    </div>
+                )}
+                {analyticsData.growthRates.length > 1 && (
+                    <div className="bg-white rounded-2xl border border-[#E2E8F0] shadow-sm p-6">
+                        <div className="mb-4">
+                            <h3 className="text-base font-black text-[#0F172A]">Growth Rate</h3>
+                            <p className="text-xs text-[#94A3B8] mt-0.5">% change between batches — green = growth, red = decline</p>
+                        </div>
+                        <div className="flex items-center gap-4 text-xs font-bold mb-3">
+                            <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-[#166534] inline-block" />Registrants</span>
+                            <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-[#10B981] inline-block" />Revenue</span>
+                        </div>
+                        <GrowthRateChart data={analyticsData.growthRates} />
+                    </div>
+                )}
+            </div>
+
+            {/* Top DCCs Leaderboard */}
+            {analyticsData.topDCCs.length > 0 && (
+                <div className="bg-white rounded-2xl border border-[#E2E8F0] shadow-sm p-6">
+                    <div className="mb-4">
+                        <h3 className="text-base font-black text-[#0F172A]">Top DCCs Leaderboard</h3>
+                        <p className="text-xs text-[#94A3B8] mt-0.5">Most active District Church Councils</p>
+                    </div>
+                    <TopDCCsLeaderboard data={analyticsData.topDCCs} />
                 </div>
             )}
         </div>
