@@ -104,6 +104,10 @@ export default function App() {
   const [isSaving, setIsSaving] = useState(false);
   const [isBatchSaved, setIsBatchSaved] = useState(false);
   const [selectedBatch, setSelectedBatch] = useState<{ batch: any; registrations: any[] } | null>(null);
+  const [selectedRegistrant, setSelectedRegistrant] = useState<any | null>(null);
+  const [isEditingRegistrant, setIsEditingRegistrant] = useState(false);
+  const [editRegistrantData, setEditRegistrantData] = useState<any | null>(null);
+  const [isSavingRegistrant, setIsSavingRegistrant] = useState(false);
   const [editingBatchRow, setEditingBatchRow] = useState<any | null>(null);
   const [isSavingBatchRow, setIsSavingBatchRow] = useState(false);
   const [editingBatchName, setEditingBatchName] = useState<{ id: string; name: string } | null>(null);
@@ -828,18 +832,6 @@ export default function App() {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-3">
-            <div className="relative mr-2">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#94A3B8]" />
-              <Input
-                placeholder="Search all records..."
-                className="pl-9 w-[200px] md:w-[300px] border-[#E2E8F0] focus-visible:ring-[#166534] bg-white"
-                value={globalSearchQuery}
-                onChange={(e) => {
-                  setGlobalSearchQuery(e.target.value);
-                  performGlobalSearch(e.target.value);
-                }}
-              />
-            </div>
             {isSupabaseConfigured ? (
               <Badge variant="outline" className="bg-[#F0FDF4] text-[#166534] border-[#BBF7D0] py-1.5 px-3">
                 <div className="w-2 h-2 bg-[#166534] rounded-full mr-2 animate-pulse"></div>
@@ -1491,23 +1483,49 @@ export default function App() {
 
           <TabsContent value="search" className="m-0">
             <Card className="border-[#E2E8F0] shadow-sm overflow-hidden">
-              <CardHeader className="border-b border-[#F1F5F9] bg-white">
+              <CardHeader className="border-b border-[#F1F5F9] bg-white space-y-4">
                 <div className="flex items-center justify-between">
                   <div>
-                    <CardTitle className="text-lg">Global Search Results</CardTitle>
+                    <CardTitle className="text-lg">Global Search</CardTitle>
                     <CardDescription>
-                      {globalSearchQuery ? `Showing results for "${globalSearchQuery}"` : "Enter a search term in the header to find records"}
+                      Search across all registrations by name, phone, email, DCC or LCC
                     </CardDescription>
                   </div>
                   {isSearching && <Loader2 className="h-5 w-5 animate-spin text-[#166534]" />}
                 </div>
+                {/* Search input */}
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#94A3B8]" />
+                  <Input
+                    placeholder="Type to search all records..."
+                    className="pl-9 border-[#E2E8F0] focus-visible:ring-[#166534] bg-white"
+                    value={globalSearchQuery}
+                    onChange={(e) => {
+                      setGlobalSearchQuery(e.target.value);
+                      performGlobalSearch(e.target.value);
+                    }}
+                  />
+                  {globalSearchQuery && (
+                    <button
+                      onClick={() => { setGlobalSearchQuery(''); setGlobalSearchResults([]); }}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-[#94A3B8] hover:text-[#EF4444] transition-colors"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+                {globalSearchQuery && globalSearchResults.length > 0 && (
+                  <p className="text-xs text-[#64748B]">
+                    Found <span className="font-bold text-[#166534]">{globalSearchResults.length}</span> result{globalSearchResults.length !== 1 ? 's' : ''} for "{globalSearchQuery}"
+                  </p>
+                )}
               </CardHeader>
               <CardContent className="p-0">
                 {!globalSearchQuery ? (
                   <div className="flex flex-col items-center justify-center h-[400px] text-[#94A3B8] bg-[#F8F9FA]">
                     <Search className="h-12 w-12 opacity-10 mb-4" />
                     <p className="font-medium">Ready to search</p>
-                    <p className="text-sm opacity-60">Search by Name, Phone, Email, DCC or LCC</p>
+                    <p className="text-sm opacity-60">Type a name, phone, email, DCC or LCC above</p>
                   </div>
                 ) : globalSearchResults.length === 0 ? (
                   <div className="flex flex-col items-center justify-center h-[400px] text-[#94A3B8] bg-[#F8F9FA]">
@@ -1528,7 +1546,11 @@ export default function App() {
                     </TableHeader>
                     <TableBody>
                       {globalSearchResults.map((reg) => (
-                        <TableRow key={reg.id} className="hover:bg-[#F8F9FA]">
+                        <TableRow
+                          key={reg.id}
+                          className="hover:bg-[#F8F9FA] cursor-pointer"
+                          onClick={() => setSelectedRegistrant(reg)}
+                        >
                           <TableCell className="font-bold text-[#1E293B]">{reg.full_name}</TableCell>
                           <TableCell>
                             <div className="flex flex-col">
@@ -1544,7 +1566,7 @@ export default function App() {
                           </TableCell>
                           <TableCell>
                             <Badge variant="outline" className="bg-[#F1F5F9] text-[#475569] border-[#E2E8F0]">
-                              {reg.batches?.name}
+                              {reg.batches?.name?.replace(/^HEKAN_Registration_Batch_?/i, '') || reg.batches?.name}
                             </Badge>
                           </TableCell>
                           <TableCell className="text-right font-mono font-bold text-[#166534]">
@@ -1804,6 +1826,166 @@ export default function App() {
               Save Changes
             </Button>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Registrant Detail Modal */}
+      <Dialog open={!!selectedRegistrant} onOpenChange={(open) => {
+        if (!open) { setSelectedRegistrant(null); setIsEditingRegistrant(false); setEditRegistrantData(null); }
+      }}>
+        <DialogContent className="w-[95vw] max-w-lg sm:max-w-[520px] max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="pr-6">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 bg-[#F0FDF4] rounded-xl flex items-center justify-center flex-shrink-0">
+                  <span className="text-lg font-black text-[#166534]">
+                    {((isEditingRegistrant ? editRegistrantData?.full_name : selectedRegistrant?.full_name)?.[0] || '?').toUpperCase()}
+                  </span>
+                </div>
+                <div className="min-w-0 flex-1">
+                  {isEditingRegistrant ? (
+                    <input
+                      className="text-base font-black text-[#0F172A] leading-tight bg-transparent border-b-2 border-[#166534] outline-none w-full"
+                      value={editRegistrantData?.full_name || ''}
+                      onChange={e => setEditRegistrantData({ ...editRegistrantData, full_name: e.target.value })}
+                    />
+                  ) : (
+                    <p className="text-base font-black text-[#0F172A] leading-tight truncate">{selectedRegistrant?.full_name}</p>
+                  )}
+                  {isEditingRegistrant ? (
+                    <input
+                      className="text-xs text-[#94A3B8] bg-transparent border-b border-[#E2E8F0] outline-none mt-0.5 w-full"
+                      value={editRegistrantData?.position || ''}
+                      onChange={e => setEditRegistrantData({ ...editRegistrantData, position: e.target.value })}
+                      placeholder="Position"
+                    />
+                  ) : (
+                    <p className="text-xs text-[#94A3B8] font-normal mt-0.5">{selectedRegistrant?.position}</p>
+                  )}
+                </div>
+              </div>
+              {/* Edit toggle — sits below the name row */}
+              <div className="mt-3 flex justify-end">
+                <button
+                  onClick={() => {
+                    if (isEditingRegistrant) {
+                      setIsEditingRegistrant(false);
+                      setEditRegistrantData(null);
+                    } else {
+                      setIsEditingRegistrant(true);
+                      setEditRegistrantData({ ...selectedRegistrant });
+                    }
+                  }}
+                  className={cn(
+                    "flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-lg transition-colors",
+                    isEditingRegistrant
+                      ? "bg-[#FEE2E2] text-[#EF4444] hover:bg-[#FECACA]"
+                      : "bg-[#F0FDF4] text-[#166534] hover:bg-[#DCFCE7]"
+                  )}
+                >
+                  {isEditingRegistrant ? (
+                    <><X className="h-3 w-3" /> Cancel</>
+                  ) : (
+                    <><Edit2 className="h-3 w-3" /> Edit</>
+                  )}
+                </button>
+              </div>
+            </DialogTitle>
+          </DialogHeader>
+
+          {selectedRegistrant && (
+            <div className="space-y-4 mt-2">
+              {/* Batch badge */}
+              <div className="flex items-center gap-2 p-3 bg-[#F8F9FA] rounded-xl">
+                <History className="h-4 w-4 text-[#6366F1] flex-shrink-0" />
+                <div>
+                  <p className="text-[10px] font-bold text-[#94A3B8] uppercase tracking-wider">Batch</p>
+                  <p className="text-xs font-bold text-[#0F172A]">
+                    {(selectedRegistrant.batches?.name || '').replace(/^HEKAN_Registration_Batch_?/i, '') || selectedRegistrant.batches?.name || '—'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Info grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {[
+                  { label: 'DCC', field: 'dcc', color: '#166534' },
+                  { label: 'LCC', field: 'lcc', color: '#10B981' },
+                  { label: 'Phone', field: 'phone', color: '#6366F1' },
+                  { label: 'Email', field: 'email', color: '#0EA5E9' },
+                  { label: 'Payment Info', field: 'payment_info', color: '#F59E0B' },
+                  { label: 'Amount', field: 'amount', color: '#EA580C' },
+                ].map((item, i) => (
+                  <div key={i} className="p-3 bg-[#F8F9FA] rounded-xl">
+                    <p className="text-[10px] font-bold uppercase tracking-wider mb-1.5" style={{ color: item.color }}>{item.label}</p>
+                    {isEditingRegistrant ? (
+                      <input
+                        className="w-full text-sm font-bold text-[#0F172A] bg-white border border-[#E2E8F0] rounded-lg px-2 py-1 outline-none focus:ring-2 focus:ring-[#166534]"
+                        value={editRegistrantData?.[item.field] || ''}
+                        onChange={e => setEditRegistrantData({ ...editRegistrantData, [item.field]: e.target.value })}
+                        placeholder={item.label}
+                      />
+                    ) : (
+                      <p className="text-sm font-bold text-[#0F172A] break-words">
+                        {item.field === 'amount' && selectedRegistrant[item.field]
+                          ? `₦${selectedRegistrant[item.field]}`
+                          : selectedRegistrant[item.field] || '—'}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex justify-between items-center pt-2 border-t">
+                <Button variant="outline" onClick={() => {
+                  setSelectedRegistrant(null);
+                  setIsEditingRegistrant(false);
+                  setEditRegistrantData(null);
+                }}>Close</Button>
+
+                {isEditingRegistrant && (
+                  <Button
+                    className="bg-[#166534] hover:bg-[#14532D] text-white"
+                    disabled={isSavingRegistrant}
+                    onClick={async () => {
+                      setIsSavingRegistrant(true);
+                      try {
+                        const { error } = await supabase
+                          .from('registrations')
+                          .update({
+                            full_name: editRegistrantData.full_name,
+                            position: editRegistrantData.position,
+                            dcc: editRegistrantData.dcc,
+                            lcc: editRegistrantData.lcc,
+                            phone: editRegistrantData.phone,
+                            email: editRegistrantData.email,
+                            payment_info: editRegistrantData.payment_info,
+                            amount: editRegistrantData.amount,
+                          })
+                          .eq('id', selectedRegistrant.id);
+                        if (error) throw error;
+                        // Update local state
+                        setSelectedRegistrant({ ...selectedRegistrant, ...editRegistrantData });
+                        setGlobalSearchResults(prev =>
+                          prev.map(r => r.id === selectedRegistrant.id ? { ...r, ...editRegistrantData } : r)
+                        );
+                        setIsEditingRegistrant(false);
+                        setEditRegistrantData(null);
+                        toast.success('Record updated successfully');
+                      } catch (err) {
+                        console.error(err);
+                        toast.error('Failed to update record');
+                      } finally {
+                        setIsSavingRegistrant(false);
+                      }
+                    }}
+                  >
+                    {isSavingRegistrant ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Saving...</> : <><Save className="h-4 w-4 mr-2" />Save Changes</>}
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 
