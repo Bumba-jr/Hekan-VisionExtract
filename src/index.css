@@ -140,3 +140,21 @@
 .scrollbar-none::-webkit-scrollbar {
   display: none;
 }
+
+/* Pointer cursor on interactive elements */
+button,
+a,
+[role="button"],
+select {
+  cursor: pointer !important;
+}
+
+input,
+textarea {
+  cursor: text !important;
+}
+
+[disabled],
+button:disabled {
+  cursor: not-allowed !important;
+}
